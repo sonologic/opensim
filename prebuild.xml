@@ -2422,6 +2422,7 @@
       <Reference name="OpenSim.Region.Framework"/>
       <Reference name="OpenSim.Server.Base"/>
       <Reference name="OpenSim.Server.Handlers"/>
+      <Reference name="OpenSim.Region.ScriptEngine.Shared"/>
 
       <!-- To allow regions to have mono addins -->
       <Reference name="Mono.Addins" path="../../../bin/" />

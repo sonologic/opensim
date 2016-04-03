@@ -12,6 +12,8 @@ using OpenSim.Services.Interfaces;
 using System.Reflection;
 using System.Collections.Generic;
 using OpenSim.Addons.RailInfra;
+using OpenSim.Region.ScriptEngine.Shared;
+using OpenSim.Addons.RailInfra.Utils;
 
 
 
@@ -31,6 +33,7 @@ namespace OpenSim.Addons.RailInfra
 		private float TrackPointAngle;
 
 		// internal book-keeping
+		private Layout m_layout;
 		private Fleet m_fleet;
 		private List<Scene> Scenes;
 
@@ -55,6 +58,7 @@ namespace OpenSim.Addons.RailInfra
 
 			// initialize book-keeping
 			Scenes = new List<Scene>();
+			m_layout = new Layout ();
 			m_fleet = new Fleet ();
 
 			m_log.DebugFormat ("[RailInfra] ManagerUUID = {0}", ManagerUUID);
@@ -75,10 +79,17 @@ namespace OpenSim.Addons.RailInfra
 			scene.AddCommand(
 				"RailInfra",
 				this,
-				"show fleet",
-				"show fleet",
+				"show rail fleet",
+				"show rail fleet",
 				"Show the RailInfraModule fleet",
 				HandleShowFleet);
+			scene.AddCommand(
+				"RailInfra",
+				this,
+				"show rail layout",
+				"show rail layout",
+				"Show the RailInfraModule layout (tracks)",
+				HandleShowRailLayout);
 
 			Scenes.Add (scene);
 		}
@@ -108,34 +119,54 @@ namespace OpenSim.Addons.RailInfra
 				m_log.DebugFormat ("[RailInfra]  List length {0}", objects.Count);
 				foreach(SceneObjectGroup obj in objects) {
 					
-					if (obj.Name == "Guide" || obj.Name == "Alt Guide") {
+					if (obj.GetPartCount()==1 && (obj.Name == "Guide" || obj.Name == "Alt Guide")) {
 						guides.Add (new TrackPoint(obj));
 						m_log.DebugFormat ("[RailInfra]   found: {0} ({1}) at {2}, rot {3}", obj.UUID, obj.Name, obj.AbsolutePosition.ToString(), obj.GroupRotation.ToString());
 					}
 				}
-
-				Dictionary<TrackPoint, Dictionary<TrackPoint, float>> distances = new Dictionary<TrackPoint, Dictionary<TrackPoint, float>> ();
-
+					
 				foreach (TrackPoint tp1 in guides) {
-					m_log.DebugFormat ("outer loop");
+					TrackPoint candidate = null;
+					m_log.DebugFormat ("outer loop tp1 = {0}, partcount={1}", tp1.ObjectGroup.UUID, tp1.ObjectGroup.GetPartCount());
 					foreach (TrackPoint tp2 in guides) {
 						float dist = tp1.DistanceSquared (tp2);
 
-						m_log.DebugFormat ("inner loop, tp1 {0}, tp2 {1}, distance {2}", tp1.ObjectGroup.UUID, tp2.ObjectGroup.UUID, dist);
+						if (tp1 != tp2) {
+							double ang_obj = GetAngle(tp1, tp2);
 
-						if(!distances.ContainsKey(tp1))
-							distances.Add(tp1, new Dictionary<TrackPoint, float>());
-						if(!distances.ContainsKey(tp2))
-							distances.Add(tp2, new Dictionary<TrackPoint, float>());
+							if (dist < TrackPointDistanceSquared && ang_obj <= TrackPointAngle) {
+								m_log.DebugFormat ("inner loop, tp1 {0}, {1}, {2}, tp2 {3}, {4}, {5}, distance {6}, angle {7}", 
+									tp1.ObjectGroup.UUID, tp1.ObjectGroup.AbsolutePosition,	StringUtils.FormatAxisAngle(tp1.ObjectGroup.GroupRotation),
+									tp2.ObjectGroup.UUID, tp2.ObjectGroup.AbsolutePosition,	StringUtils.FormatAxisAngle(tp2.ObjectGroup.GroupRotation),
+									dist, ang_obj);
 
-						distances [tp1].Add (tp2, dist);
-
-						m_log.DebugFormat ("tp1 rotation {0}. tp2 rotation {1}, diff {2}", 
-							FormatAxisAngle(tp1.ObjectGroup.GroupRotation),
-							FormatAxisAngle(tp2.ObjectGroup.GroupRotation),
-							FormatAxisAngle(tp1.ObjectGroup.GroupRotation - tp2.ObjectGroup.GroupRotation));
+								if (candidate == null) {
+									candidate = tp2;
+								} else {
+									if (candidate.DistanceSquared (tp1) > dist) {
+										candidate = tp2;
+									}
+								}
+							}
+						}
+					}
+					tp1.Next = candidate;
+					if (candidate != null) {
+						candidate.Prev = tp1;
+						m_log.DebugFormat ("------ tp1 ({0}) next = {1}", tp1.ObjectGroup.UUID, tp1.Next.ObjectGroup.UUID);
+					} else {
+						m_log.DebugFormat ("------ tp1 ({0}) next = null", tp1.ObjectGroup.UUID);
 					}
 				}
+
+				// now we have Next and Prev initialised for each TrackPoint
+
+				// one-by-one add to layout, this will seperate the tp's in disconnected graphs
+				foreach (TrackPoint tp in guides) {
+					m_layout.Add (tp);					
+				}
+
+				m_log.Debug (m_layout.ToString ());
 			}
 		}
 
@@ -159,8 +190,8 @@ namespace OpenSim.Addons.RailInfra
 
 		private void HandleShowFleet(string module, string[] cmd)
 		{
-			m_log.DebugFormat ("[RailInfra] HandleShowFleet, module {0}, cmd[0] {1}, cmd[1] {2}", module, cmd [0], cmd [1]);
-			if (module == "RailInfra" && cmd.Length == 2 && cmd [0] == "show" && cmd [1] == "fleet") {
+			m_log.DebugFormat ("[RailInfra] HandleShowFleet, module {0}, cmd[0] {1}, cmd[1] {2}, cmd[2] {3}", module, cmd [0], cmd [1], cmd[2]);
+			if (module == "RailInfra" && cmd.Length == 3 && cmd [0] == "show" && cmd [1] == "rail" && cmd[2] == "fleet") {
 				MainConsole.Instance.OutputFormat ("{0,-36}  {1,-36}  {2,-16}  {3,-16}",
 					"Key",
 					"UUID",
@@ -169,6 +200,13 @@ namespace OpenSim.Addons.RailInfra
 				);
 				MainConsole.Instance.Output (m_fleet.ToString ());
 			}
+		}
+
+		private void HandleShowRailLayout(string module, string[] cmd)
+		{
+			if (module == "RailInfra" && cmd.Length == 3 && cmd [0] == "show" && cmd [1] == "rail" && cmd[2] == "layout") {
+				MainConsole.Instance.OutputFormat ("{0}", m_layout.ToString ());
+			}			
 		}
 
 		private void OnChatFromClient(Object sender_obj, OSChatMessage chat)
@@ -219,12 +257,61 @@ namespace OpenSim.Addons.RailInfra
 			//}
 		}
 
-		public static string FormatAxisAngle(Quaternion q)
+
+
+		public static double GetAngle(TrackPoint tp1, TrackPoint tp2)
 		{
-			Vector3 axis;
-			float angle;
-			q.GetAxisAngle (out axis, out angle);
-			return String.Format("{0}, {1}", axis, angle);
+			// get angle (code copied from SensorRepeat.cs)
+			double ang_obj = 0;
+
+			SceneObjectPart SensePoint = tp1.ObjectGroup.GetLinkNumPart(0);
+
+			Vector3 fromRegionPos = SensePoint.GetWorldPosition();
+
+			// pre define some things to avoid repeated definitions in the loop body
+			Vector3 toRegionPos;
+			//double dis;
+			//int objtype;
+			//SceneObjectPart part;
+			//float dx;
+			//float dy;
+			//float dz;
+
+			Quaternion q = SensePoint.GetWorldRotation();
+
+			LSL_Types.Quaternion r = new LSL_Types.Quaternion(q);
+			LSL_Types.Vector3 forward_dir = (new LSL_Types.Vector3(1, 0, 0) * r);
+			double mag_fwd = LSL_Types.Vector3.Mag(forward_dir);
+
+			//Vector3 ZeroVector = new Vector3(0, 0, 0);
+
+			toRegionPos = tp2.ObjectGroup.AbsolutePosition;
+
+			// Calculation is in line for speed
+			//dx = toRegionPos.X - fromRegionPos.X;
+			//dy = toRegionPos.Y - fromRegionPos.Y;
+			//dz = toRegionPos.Z - fromRegionPos.Z;
+
+			//dis = Math.Sqrt(dx * dx + dy * dy + dz * dz);
+
+			// not omni-directional. Can you see it ?
+			// vec forward_dir = llRot2Fwd(llGetRot())
+			// vec obj_dir = toRegionPos-fromRegionPos
+			// dot=dot(forward_dir,obj_dir)
+			// mag_fwd = mag(forward_dir)
+			// mag_obj = mag(obj_dir)
+			// ang = acos(dot /(mag_fwd*mag_obj))
+
+			try {
+				Vector3 diff = toRegionPos - fromRegionPos;
+				double dot = LSL_Types.Vector3.Dot (forward_dir, diff);
+				double mag_obj = LSL_Types.Vector3.Mag (diff);
+				ang_obj = Math.Acos (dot / (mag_fwd * mag_obj));
+			} catch {
+				m_log.ErrorFormat ("exception calculating angle");
+			}
+
+			return ang_obj;
 		}
 	}
 }
