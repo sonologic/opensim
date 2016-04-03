@@ -18,6 +18,54 @@ namespace OpenSim.RailInfra
 {
 	public enum VehicleState { NEW, CENTER, IDLE, RUN };
 
+	public class TrackPoint
+	{
+		public SceneObjectGroup ObjectGroup { get; private set; }
+		public TrackPoint Next { get; private set; }
+		public TrackPoint Prev { get; private set; }
+
+		public TrackPoint(SceneObjectGroup obj)
+		{
+			ObjectGroup = obj;
+			Next = null;
+			Prev = null;
+		}
+
+		public float Manhattan(TrackPoint p)
+		{
+			return Math.Abs (ObjectGroup.AbsolutePosition.X - p.ObjectGroup.AbsolutePosition.X) +
+			Math.Abs (ObjectGroup.AbsolutePosition.Y - p.ObjectGroup.AbsolutePosition.Y) +
+			Math.Abs (ObjectGroup.AbsolutePosition.Z - p.ObjectGroup.AbsolutePosition.Z);
+		}
+
+		public float DistanceSquared(TrackPoint p)
+		{
+			float dx = Math.Abs (ObjectGroup.AbsolutePosition.X - p.ObjectGroup.AbsolutePosition.X);
+			float dy = Math.Abs (ObjectGroup.AbsolutePosition.Y - p.ObjectGroup.AbsolutePosition.Y);
+			float dz = Math.Abs (ObjectGroup.AbsolutePosition.Z - p.ObjectGroup.AbsolutePosition.Z);
+
+			return (dx * dx) + (dy * dy) + (dz * dz);
+		}
+	}
+
+	public class Track
+	{
+		TrackPoint root;
+
+		public Track() {
+			root = null;
+		}
+
+		public void Add(TrackPoint p)
+		{
+			if (root == null) {
+				root = p;
+			} else {
+				
+			}
+		}
+	}
+
 	public class Vehicle
 	{
 		public SceneObjectGroup ObjectGroup { get; private set; }
@@ -30,7 +78,7 @@ namespace OpenSim.RailInfra
 
 		public override string ToString()
 		{
-			return String.Format ("{0,36} - {1,16} - {2,16}",
+			return String.Format ("{0,-36}  {1,-16}  {2,-16}",
 				ObjectGroup.UUID.ToString (),
 				ObjectGroup.Name,
 				ObjectGroup.Description);
@@ -72,7 +120,7 @@ namespace OpenSim.RailInfra
 				Vehicle vehicle = entry.Value;
 				if (rv.Length > 0)
 					rv += "\n";
-				rv += String.Format("{0,36} - {1}", entry.Key, vehicle.ToString ());
+				rv += String.Format("{0,-36}  {1}", entry.Key, vehicle.ToString ());
 			}
 			return rv;
 		}
@@ -83,11 +131,19 @@ namespace OpenSim.RailInfra
 	{
 		private static readonly ILog m_log = LogManager.GetLogger(MethodBase.GetCurrentMethod().DeclaringType);
 
+
+		// config values
 		private string ManagerUUID;
-
 		private int Channel;
+		private float TrackPointDistanceSquared;
+		private float TrackPointAngle;
 
+		// internal book-keeping
 		private Fleet m_fleet;
+		private List<Scene> Scenes;
+
+
+		// interface implementation:
 
 		public string Name { get { return "RailInfraModule"; } }
 
@@ -99,15 +155,18 @@ namespace OpenSim.RailInfra
 
 			IConfig conf = config.Configs ["RailInfraModule"];
 
+			// read config values
 			ManagerUUID = conf.GetString ("ManagerUUID", String.Empty);
 			Channel = conf.GetInt ("Channel", -62896351);
+			TrackPointDistanceSquared = conf.GetFloat ("TrackPointDistance") * conf.GetFloat ("TrackPointDistance");
+			TrackPointAngle = conf.GetFloat ("TrackPointAngle");
 
+			// initialize book-keeping
+			Scenes = new List<Scene>();
 			m_fleet = new Fleet ();
 
 			m_log.DebugFormat ("[RailInfra] ManagerUUID = {0}", ManagerUUID);
 			m_log.DebugFormat ("[RailInfra] Channel = {0}", Channel);
-
-
 		}
 
 
@@ -128,24 +187,14 @@ namespace OpenSim.RailInfra
 				"show fleet",
 				"Show the RailInfraModule fleet",
 				HandleShowFleet);
-		}
 
-		private void HandleShowFleet(string module, string[] cmd)
-		{
-			m_log.DebugFormat ("HandleShowFleet, module {0}, cmd[0] {1}, cmd[1] {2}", module, cmd [0], cmd [1]);
-			if (module == "RailInfra" && cmd.Length == 2 && cmd [0] == "show" && cmd [1] == "fleet") {
-				MainConsole.Instance.OutputFormat ("{0,36}   {1,36}   {2,16}   {3,16}",
-					"Key",
-					"UUID",
-					"Name",
-					"Description"
-				);
-				MainConsole.Instance.Output (m_fleet.ToString ());
-			}
+			Scenes.Add (scene);
 		}
 
 		public void RemoveRegion(Scene scene)
 		{
+			Scenes.Remove (scene);
+
 			m_log.DebugFormat ("[RailInfra] remove region {0}", scene.RegionInfo.RegionName);
 
 			scene.EventManager.OnChatFromClient -= OnChatFromClient;
@@ -155,7 +204,47 @@ namespace OpenSim.RailInfra
 
 		public void PostInitialise()
 		{
-			m_log.DebugFormat("[RailInfra]: PostInitialise()");
+			m_log.DebugFormat("[RailInfra] PostInitialise()");
+
+			m_log.DebugFormat ("[RailInfra] Scenes:");
+			foreach (Scene scene in Scenes) {
+				m_log.DebugFormat ("[RailInfra] fetching objects for region {0}", scene.Name);
+
+				List<SceneObjectGroup> objects = scene.GetSceneObjectGroups ();
+
+				List<TrackPoint> guides = new List<TrackPoint>();
+				m_log.DebugFormat ("[RailInfra]  List length {0}", objects.Count);
+				foreach(SceneObjectGroup obj in objects) {
+					
+					if (obj.Name == "Guide" || obj.Name == "Alt Guide") {
+						guides.Add (new TrackPoint(obj));
+						m_log.DebugFormat ("[RailInfra]   found: {0} ({1}) at {2}, rot {3}", obj.UUID, obj.Name, obj.AbsolutePosition.ToString(), obj.GroupRotation.ToString());
+					}
+				}
+
+				Dictionary<TrackPoint, Dictionary<TrackPoint, float>> distances = new Dictionary<TrackPoint, Dictionary<TrackPoint, float>> ();
+
+				foreach (TrackPoint tp1 in guides) {
+					m_log.DebugFormat ("outer loop");
+					foreach (TrackPoint tp2 in guides) {
+						float dist = tp1.DistanceSquared (tp2);
+
+						m_log.DebugFormat ("inner loop, tp1 {0}, tp2 {1}, distance {2}", tp1.ObjectGroup.UUID, tp2.ObjectGroup.UUID, dist);
+
+						if(!distances.ContainsKey(tp1))
+							distances.Add(tp1, new Dictionary<TrackPoint, float>());
+						if(!distances.ContainsKey(tp2))
+							distances.Add(tp2, new Dictionary<TrackPoint, float>());
+
+						distances [tp1].Add (tp2, dist);
+
+						m_log.DebugFormat ("tp1 rotation {0}. tp2 rotation {1}, diff {2}", 
+							FormatAxisAngle(tp1.ObjectGroup.GroupRotation),
+							FormatAxisAngle(tp2.ObjectGroup.GroupRotation),
+							FormatAxisAngle(tp1.ObjectGroup.GroupRotation - tp2.ObjectGroup.GroupRotation));
+					}
+				}
+			}
 		}
 
 		public void Close()
@@ -169,9 +258,26 @@ namespace OpenSim.RailInfra
 		{
 			
 			m_log.DebugFormat ("[RailInfra] loaded region {0}", scene.RegionInfo.RegionName);
+
+
 		}
 
 
+		// handlers:
+
+		private void HandleShowFleet(string module, string[] cmd)
+		{
+			m_log.DebugFormat ("[RailInfra] HandleShowFleet, module {0}, cmd[0] {1}, cmd[1] {2}", module, cmd [0], cmd [1]);
+			if (module == "RailInfra" && cmd.Length == 2 && cmd [0] == "show" && cmd [1] == "fleet") {
+				MainConsole.Instance.OutputFormat ("{0,-36}  {1,-36}  {2,-16}  {3,-16}",
+					"Key",
+					"UUID",
+					"Name",
+					"Description"
+				);
+				MainConsole.Instance.Output (m_fleet.ToString ());
+			}
+		}
 
 		private void OnChatFromClient(Object sender_obj, OSChatMessage chat)
 		{
@@ -219,6 +325,14 @@ namespace OpenSim.RailInfra
 			}
 
 			//}
+		}
+
+		public static string FormatAxisAngle(Quaternion q)
+		{
+			Vector3 axis;
+			float angle;
+			q.GetAxisAngle (out axis, out angle);
+			return String.Format("{0}, {1}", axis, angle);
 		}
 	}
 }
