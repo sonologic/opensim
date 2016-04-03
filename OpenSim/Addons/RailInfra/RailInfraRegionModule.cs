@@ -11,120 +11,12 @@ using OpenSim.Region.Framework.Scenes;
 using OpenSim.Services.Interfaces;
 using System.Reflection;
 using System.Collections.Generic;
+using OpenSim.Addons.RailInfra;
 
 
 
-namespace OpenSim.RailInfra
+namespace OpenSim.Addons.RailInfra
 {
-	public enum VehicleState { NEW, CENTER, IDLE, RUN };
-
-	public class TrackPoint
-	{
-		public SceneObjectGroup ObjectGroup { get; private set; }
-		public TrackPoint Next { get; private set; }
-		public TrackPoint Prev { get; private set; }
-
-		public TrackPoint(SceneObjectGroup obj)
-		{
-			ObjectGroup = obj;
-			Next = null;
-			Prev = null;
-		}
-
-		public float Manhattan(TrackPoint p)
-		{
-			return Math.Abs (ObjectGroup.AbsolutePosition.X - p.ObjectGroup.AbsolutePosition.X) +
-			Math.Abs (ObjectGroup.AbsolutePosition.Y - p.ObjectGroup.AbsolutePosition.Y) +
-			Math.Abs (ObjectGroup.AbsolutePosition.Z - p.ObjectGroup.AbsolutePosition.Z);
-		}
-
-		public float DistanceSquared(TrackPoint p)
-		{
-			float dx = Math.Abs (ObjectGroup.AbsolutePosition.X - p.ObjectGroup.AbsolutePosition.X);
-			float dy = Math.Abs (ObjectGroup.AbsolutePosition.Y - p.ObjectGroup.AbsolutePosition.Y);
-			float dz = Math.Abs (ObjectGroup.AbsolutePosition.Z - p.ObjectGroup.AbsolutePosition.Z);
-
-			return (dx * dx) + (dy * dy) + (dz * dz);
-		}
-	}
-
-	public class Track
-	{
-		TrackPoint root;
-
-		public Track() {
-			root = null;
-		}
-
-		public void Add(TrackPoint p)
-		{
-			if (root == null) {
-				root = p;
-			} else {
-				
-			}
-		}
-	}
-
-	public class Vehicle
-	{
-		public SceneObjectGroup ObjectGroup { get; private set; }
-		public VehicleState State { get; private set; }
-
-		public Vehicle(SceneObjectGroup obj) {
-			ObjectGroup = obj;
-			State = VehicleState.NEW;
-		}
-
-		public override string ToString()
-		{
-			return String.Format ("{0,-36}  {1,-16}  {2,-16}",
-				ObjectGroup.UUID.ToString (),
-				ObjectGroup.Name,
-				ObjectGroup.Description);
-		}
-	}
-
-	public class Fleet
-	{
-		public Dictionary<UUID, Vehicle> Vehicles { get; private set; }
-
-		public Fleet()
-		{
-			Vehicles = new Dictionary<UUID, Vehicle> ();
-		}
-
-		public bool ContainsUUID(UUID uuid)
-		{
-			return Vehicles.ContainsKey (uuid);
-		}
-
-		public void RegisterVehicle(Vehicle vehicle)
-		{
-			if (ContainsUUID (vehicle.ObjectGroup.UUID)) {
-				throw new Exception ("Vehicle already registered");
-			}
-			Vehicles.Add (vehicle.ObjectGroup.UUID, vehicle);
-		}
-
-		public void RegisterVehicle(UUID uuid, SceneObjectGroup object_group)
-		{
-			RegisterVehicle (new Vehicle (object_group));
-		}
-
-		public override string ToString()
-		{
-			string rv = "";
-
-			foreach (KeyValuePair<UUID, Vehicle> entry in Vehicles) {
-				Vehicle vehicle = entry.Value;
-				if (rv.Length > 0)
-					rv += "\n";
-				rv += String.Format("{0,-36}  {1}", entry.Key, vehicle.ToString ());
-			}
-			return rv;
-		}
-	}
 
 	[Extension(Path = "/OpenSim/RegionModules", NodeName = "RegionModule", Id = "RailInfraModule")]
 	public class RailInfraModule : ISharedRegionModule
