@@ -1,5 +1,7 @@
 ﻿using System;
 using System.Collections.Generic;
+using log4net;
+using System.Reflection;
 
 namespace OpenSim.Addons.RailInfra
 {
@@ -8,6 +10,8 @@ namespace OpenSim.Addons.RailInfra
 	// node (which is any arbitrary node on the track)</summary>
 	public class Layout
 	{
+		private static readonly ILog m_log = LogManager.GetLogger(MethodBase.GetCurrentMethod().DeclaringType);
+
 		// <summary>List of tracks</summary>
 		private Dictionary<int, List<TrackPoint>> tracks;
 		private Dictionary<TrackPoint, int> tp_track_ids;
@@ -21,6 +25,30 @@ namespace OpenSim.Addons.RailInfra
 			NextTrackId = 0;
 		}
 
+		private void MergeTracks(int id1, int id2)
+		{
+			
+			int dst;
+			int src;
+			if (id1 < id2) {
+				dst = id1;
+				src = id2;
+			} else {
+				dst = id2;
+				src = id1;
+			}
+
+			m_log.DebugFormat ("Merging tracks {0} and {1}", dst, src);
+
+			if (src != dst) {  // merge
+				foreach (TrackPoint track_tp in tracks[src]) {
+					tracks [dst].Add (track_tp);
+					tp_track_ids [track_tp] = dst;
+				}
+				tracks.Remove (src);
+			}
+		}
+
 		public void Add(TrackPoint tp)
 		{
 			if(tracks.Count==0) {
@@ -29,45 +57,29 @@ namespace OpenSim.Addons.RailInfra
 				tracks [track_id].Add (tp);
 				tp_track_ids[tp] = track_id;
 			} else {
-				int? prev_track_id = null;
-				int? next_track_id = null;
+				List<int> track_ids = new List<int>();
 
-				if(tp.Prev!=null)
-					if (tp_track_ids.ContainsKey(tp.Prev))
-						prev_track_id = tp_track_ids[tp.Prev];
+				List<TrackPoint> links = tp.Links;
 
-				if(tp.Next!=null)
-					if (tp_track_ids.ContainsKey(tp.Next))
-						next_track_id = tp_track_ids[tp.Next];
+				foreach(TrackPoint link_tp in links) {
+					m_log.DebugFormat ("in add loop, link_tp is {0}", link_tp);
+					if(tp_track_ids.ContainsKey(link_tp))
+						track_ids.Add(tp_track_ids[link_tp]);
+				}
 
-				if(next_track_id!=null && prev_track_id!=null) {
+				if(track_ids.Count>1) {
 					// need to merge?
-					int dst;
-					int src;
-					if (next_track_id < prev_track_id) {
-						dst = (int)next_track_id;
-						src = (int)prev_track_id;
-					} else {
-						dst = (int)prev_track_id;
-						src = (int)next_track_id;
+					track_ids.Sort();
+
+					for(int i=1;i<track_ids.Count;i++) {
+						MergeTracks(track_ids[0], track_ids[i]);
 					}
 
-					if (src != dst) {  // merge
-						foreach (TrackPoint track_tp in tracks[src]) {
-							tracks [dst].Add (track_tp);
-							tp_track_ids [track_tp] = dst;
-						}
-						tracks.Remove (src);
-					}
-
-					tp_track_ids [tp] = dst;
-					tracks [dst].Add (tp);
-				} else if (next_track_id != null) {
-					tp_track_ids [tp] = (int)next_track_id;
-					tracks [(int)next_track_id].Add (tp);
-				} else if (prev_track_id != null) {
-					tp_track_ids [tp] = (int)prev_track_id;
-					tracks [(int)prev_track_id].Add (tp);
+					tp_track_ids [tp] = track_ids[0];
+					tracks [track_ids[0]].Add (tp);
+				} else if (track_ids.Count==1) {
+					tp_track_ids [tp] = track_ids[0];
+					tracks [track_ids[0]].Add (tp);
 				} else {
 					int track_id = NextTrackId++;
 					tracks.Add (track_id, new List<TrackPoint> ());
