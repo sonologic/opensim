@@ -15,6 +15,7 @@ using OpenSim.Addons.RailInfra;
 using OpenSim.Region.ScriptEngine.Shared;
 using OpenSim.Region.ScriptEngine.Interfaces;
 using OpenSim.Addons.RailInfra.Utils;
+//using OpenSim.Region.CoreModules.Framework.InterfaceCommander;
 
 
 
@@ -26,20 +27,19 @@ namespace OpenSim.Addons.RailInfra
 	{
 		private static readonly ILog m_log = LogManager.GetLogger(MethodBase.GetCurrentMethod().DeclaringType);
 
-		private delegate void ConsoleCommandHandler(string[] cmd);
-		private Dictionary<String[], ConsoleCommandHandler> ConsoleCommandHandlers;
-
+		private ScriptChatHandler m_chat_handler;
 
 		// config values
-		private string ManagerUUID;
-		private int Channel;
-		private float TrackPointDistanceSquared;
-		private float TrackPointAngle;
+		private string m_ManagerUUID;
+		public int m_channel { get; private set; }
+		private float m_TrackPointDistanceSquared;
+		private float m_TrackPointAngle;
 
 		// internal book-keeping
-		private Dictionary<Scene, Layout> m_layouts;
-		private Fleet m_fleet;
-		private List<Scene> Scenes;
+		public Dictionary<Scene, Layout> m_layouts { get; private set; }
+		public Fleet m_fleet { get; private set; }
+		public List<Scene> m_scenes { get; private set; }
+		public Dictionary<Scene, ConsoleHandler> m_console_handlers { get; private set; }
 
 		// interface implementation:
 
@@ -51,44 +51,26 @@ namespace OpenSim.Addons.RailInfra
 		{
 			m_log.DebugFormat ("[RailInfra] Initialise()");
 
-			ConsoleCommandHandlers = new Dictionary<String[], ConsoleCommandHandler>();
-
-			String[] cmd1 = new String[2] { "show", "fleet" };
-			ConsoleCommandHandlers.Add(cmd1 , HandleShowFleet);
-
-			String[] cmd2 = new String[2] { "show", "layout" };
-			ConsoleCommandHandlers.Add(cmd2 , HandleShowLayout);
-
-			String[] cmd3 = new String[2] { "show", "ascii" };
-			ConsoleCommandHandlers.Add(cmd3 , HandleShowAscii);
-
-			String[] cmd4 = new String[1] { "reload" };
-			ConsoleCommandHandlers.Add(cmd4 , HandleReload);
-
-			/*
-				{ { "show", "layout" } , HandleShowLayout },
-				{ { "show", "ascii" } , HandleShowAscii },
-				{ { "reload" } , HandleReload }*/
-
-			//
 
 			IConfig conf = config.Configs ["RailInfraModule"];
 
 			// read config values
-			ManagerUUID = conf.GetString ("ManagerUUID", String.Empty);
-			Channel = conf.GetInt ("Channel", -62896351);
-			TrackPointDistanceSquared = conf.GetFloat ("TrackPointDistance") * conf.GetFloat ("TrackPointDistance");
-			TrackPointAngle = conf.GetFloat ("TrackPointAngle");
+			m_ManagerUUID = conf.GetString ("ManagerUUID", String.Empty);
+			m_channel = conf.GetInt ("Channel", -62896351);
+			m_TrackPointDistanceSquared = conf.GetFloat ("TrackPointDistance") * conf.GetFloat ("TrackPointDistance");
+			m_TrackPointAngle = conf.GetFloat ("TrackPointAngle");
 
 			// initialize book-keeping
-			Scenes = new List<Scene>();
+			m_scenes = new List<Scene>();
 			m_layouts = new Dictionary<Scene, Layout> ();
 			m_fleet = new Fleet ();
+			m_console_handlers = new Dictionary<Scene, ConsoleHandler> ();
+			m_chat_handler = new ScriptChatHandler (this);
 
-			m_log.DebugFormat ("[RailInfra] ManagerUUID = {0}", ManagerUUID);
-			m_log.DebugFormat ("[RailInfra] Channel = {0}", Channel);
-			m_log.DebugFormat ("[RailInfra] TrackPointDistanceSquared = {0}", TrackPointDistanceSquared);
-			m_log.DebugFormat ("[RailInfra] TrackPointAngle = {0}", TrackPointAngle);
+			m_log.DebugFormat ("[RailInfra] ManagerUUID = {0}", m_ManagerUUID);
+			m_log.DebugFormat ("[RailInfra] Channel = {0}", m_channel);
+			m_log.DebugFormat ("[RailInfra] TrackPointDistanceSquared = {0}", m_TrackPointDistanceSquared);
+			m_log.DebugFormat ("[RailInfra] TrackPointAngle = {0}", m_TrackPointAngle);
 		}
 
 
@@ -97,53 +79,27 @@ namespace OpenSim.Addons.RailInfra
 		{
 			m_log.DebugFormat ("[RailInfra] add region {0}", scene.RegionInfo.RegionName);
 
-			scene.EventManager.OnChatBroadcast += OnChatFromClient;
-			scene.EventManager.OnChatFromWorld += OnChatFromClient;
-			scene.EventManager.OnChatFromClient += OnChatFromClient;
+			//scene.EventManager.OnChatBroadcast += OnChatFromClient;
+			scene.EventManager.OnChatFromWorld += m_chat_handler.ProcessChat;
+			//scene.EventManager.OnChatFromClient += OnChatFromClient;
 
-			scene.RegisterModuleInterface<RailInfraModule>(this);
-			scene.AddCommand(
-				"RailInfra",
-				this,
-				"rail show fleet",
-				"rail show fleet",
-				"Show the RailInfraModule fleet",
-				HandleConsoleCommand);
-			scene.AddCommand(
-				"RailInfra",
-				this,
-				"rail show layout",
-				"rail show layout",
-				"Show the RailInfraModule layout (tracks)",
-				HandleConsoleCommand);
-			scene.AddCommand(
-				"RailInfra",
-				this,
-				"rail show ascii",
-				"rail show ascii",
-				"Show the RailInfraModule layout (tracks) as ascii art",
-				HandleConsoleCommand);
-			scene.AddCommand (
-				"RailInfra",
-				this,
-				"rail reload",
-				"rail reload",
-				"Reloads the RailInfraModule track information",
-				HandleConsoleCommand);
-			
+			ConsoleHandler ch = new ConsoleHandler (this, scene);
+			m_console_handlers.Add (scene, ch);
 
-			Scenes.Add (scene);
+			m_scenes.Add (scene);
 		}
 
 		public void RemoveRegion(Scene scene)
 		{
-			Scenes.Remove (scene);
+			m_scenes.Remove (scene);
+			m_console_handlers.Remove (scene);
+			m_layouts.Remove (scene);
 
 			m_log.DebugFormat ("[RailInfra] remove region {0}", scene.RegionInfo.RegionName);
 
-			scene.EventManager.OnChatFromClient -= OnChatFromClient;
-			scene.EventManager.OnChatFromWorld -= OnChatFromClient;
-			scene.EventManager.OnChatBroadcast -= OnChatFromClient;
+			//scene.EventManager.OnChatFromClient -= OnChatFromClient;
+			scene.EventManager.OnChatFromWorld -= m_chat_handler.ProcessChat;
+			//scene.EventManager.OnChatBroadcast -= OnChatFromClient;
 		}
 
 		public void PostInitialise()
@@ -171,12 +127,12 @@ namespace OpenSim.Addons.RailInfra
 
 		// helpers:
 
-		private void ScanScenes()
+		public void ScanScenes()
 		{
 			// todo: lock access
 			m_layouts = new Dictionary<Scene, Layout>();
 
-			foreach (Scene scene in Scenes) {
+			foreach (Scene scene in m_scenes) {
 				
 
 				m_log.DebugFormat ("[RailInfra] scanning region {0}", scene.Name);
@@ -220,7 +176,7 @@ namespace OpenSim.Addons.RailInfra
 						if (g1 != g2) {
 							double ang_obj = MathUtils.GetAngle(g1, g2);
 
-							if (dist <= TrackPointDistanceSquared && ang_obj <= TrackPointAngle) {
+							if (dist <= m_TrackPointDistanceSquared && ang_obj <= m_TrackPointAngle) {
 								m_log.DebugFormat ("*in| tp2 = {0}, {1}, {2}, distance = {3}, angle = {4}, delta_rot = {5}", 
 									g2.Description, g2.AbsolutePosition, StringUtils.FormatAxisAngle( g2.GroupRotation),
 									dist, ang_obj, StringUtils.FormatAxisAngle(g2.GroupRotation / g1.GroupRotation));
@@ -383,67 +339,7 @@ namespace OpenSim.Addons.RailInfra
 						
 		}
 
-		// handlers:
-
-
-		private void HandleConsoleCommand(string module, string[] cmd)
-		{
-			m_log.DebugFormat ("[RailInfra] HandleConsoleCommand, module {0}, cmd[] {1}", module, string.Join(" ", cmd));
-
-			if (cmd.Length < 2 || cmd [0] != "rail")
-				return;
-
-			foreach(String[] handler_cmd in ConsoleCommandHandlers.Keys) {
-				int match=0;
-				var cmd_tail = new List<String>();
-
-				for(int i=1;(i<cmd.Length);i++) {
-					if(i<handler_cmd.Length+1 && cmd[i]==handler_cmd[i-1]) match++;
-					if(i>=handler_cmd.Length+1) cmd_tail.Add(cmd[i]);
-				}
-
-				if(match==handler_cmd.Length) {
-					ConsoleCommandHandlers[handler_cmd](cmd_tail.ToArray());
-				}
-			}
-		}
-
-		private void HandleShowFleet(string[] cmd)
-		{
-			m_log.DebugFormat ("[RailInfra] HandleShowFleet");
-
-			MainConsole.Instance.OutputFormat ("{0,-36}  {1,-36}  {2,-16}  {3,-16}",
-				"Key",
-				"UUID",
-				"Name",
-				"Description"
-			);
-			MainConsole.Instance.Output (m_fleet.ToString ());
-		}
-
-		private void HandleShowLayout(string[] cmd)
-		{
-			foreach (Scene scene in Scenes) {
-				MainConsole.Instance.OutputFormat ("---[ Region {0}", scene.RegionInfo.RegionName);
-				MainConsole.Instance.OutputFormat ("{0}", m_layouts [scene].ToString ());
-			}
-		}
-
-		private void HandleShowAscii(string[] cmd)
-		{
-			foreach (Scene scene in Scenes) {
-				MainConsole.Instance.OutputFormat ("---[ Region {0}", scene.RegionInfo.RegionName);
-				MainConsole.Instance.OutputFormat ("{0}", m_layouts [scene].ToAsciiGrid (100,200));
-			}
-		}
-
-		private void HandleReload(string[] cmd)
-		{
-			MainConsole.Instance.OutputFormat ("Initiating track scan..");
-			ScanScenes ();
-			MainConsole.Instance.OutputFormat ("Track scan complete..");
-		}
-
+		/*
 		private void OnChatFromClient(Object sender_obj, OSChatMessage chat)
 		{
 			//if (chat.Channel == Channel) {
@@ -460,7 +356,7 @@ namespace OpenSim.Addons.RailInfra
 			if (sender != null) {
 				m_log.DebugFormat ("sender object group {0} ({1})", sender.AbsolutePosition.ToString (), sender.Name);
 
-				if (chat.Channel == Channel) {
+				if (chat.Channel == m_channel) {
 					string[] tokens = chat.Message.Split (' ');
 
 					if (tokens.Length > 1) {
@@ -470,12 +366,9 @@ namespace OpenSim.Addons.RailInfra
 
 						switch (cmd) {
 						case "register":
-							m_log.DebugFormat ("registering {0}", tokens [1]);
-								if (!m_fleet.ContainsUUID (uuid)) {
-									m_fleet.RegisterVehicle (uuid, sender);
-								}
-							} else {
-								m_log.DebugFormat ("could not parse '{0}' as UUID", tokens [1]);
+							m_log.DebugFormat ("registering {0}", sender.UUID);
+							if (!m_fleet.ContainsUUID (sender.UUID)) {
+								m_fleet.RegisterVehicle (sender.UUID, sender);
 							}
 							break;
 						default:
@@ -504,7 +397,7 @@ namespace OpenSim.Addons.RailInfra
 			}
 
 			//}
-		}
+		}*/
 	}
 }
 
