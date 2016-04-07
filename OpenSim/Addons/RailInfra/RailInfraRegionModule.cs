@@ -457,16 +457,13 @@ namespace OpenSim.Addons.RailInfra
 
 			SceneObjectGroup sender = ((Scene)chat.Scene).GetSceneObjectGroup(chat.SenderUUID);
 
-
-
-
 			if (sender != null) {
 				m_log.DebugFormat ("sender object group {0} ({1})", sender.AbsolutePosition.ToString (), sender.Name);
 
 				if (chat.Channel == Channel) {
 					string[] tokens = chat.Message.Split (' ');
 
-					if (tokens.Length == 2) {
+					if (tokens.Length > 1) {
 						string cmd = tokens [0];
 
 						m_log.DebugFormat ("cmd is {0}", cmd);
@@ -474,8 +471,6 @@ namespace OpenSim.Addons.RailInfra
 						switch (cmd) {
 						case "register":
 							m_log.DebugFormat ("registering {0}", tokens [1]);
-							UUID uuid;
-							if (UUID.TryParse (tokens [1], out uuid)) {
 								if (!m_fleet.ContainsUUID (uuid)) {
 									m_fleet.RegisterVehicle (uuid, sender);
 								}
