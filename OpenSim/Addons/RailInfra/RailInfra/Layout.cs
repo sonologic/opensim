@@ -104,6 +104,67 @@ namespace OpenSim.Addons.RailInfra
 
 			return rv;
 		}
+
+		static string track_chars = "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ";
+
+		static public char TrackIdToChar(int track_id)
+		{
+			if(track_id<0 || track_id>track_chars.Length)
+				return '-';
+			return track_chars [track_id];
+		}
+
+		public string ToAsciiGrid(int width, int height)
+		{
+			char[,] grid = new char[width,height];
+
+			for(int y=0;y<height;y++)
+				for(int x=0;x<width;x++)
+					grid[x,y]='.';
+
+			float? region_w = null;
+			float? region_h = null;
+			float? factor_w = null;
+			float? factor_h = null;
+
+			foreach(int track_id in tracks.Keys) {
+				foreach(TrackPoint tp in tracks[track_id]) {
+					if(region_w==null) {
+						region_w = tp.ObjectGroup.Scene.RegionInfo.RegionSizeX;
+						region_h = tp.ObjectGroup.Scene.RegionInfo.RegionSizeY;
+						factor_w = width / region_w;
+						factor_h = height / region_h;
+						m_log.DebugFormat ("region w,h = {0}, {1}  -  factor w,h = {2}, {3}", region_w, region_h, factor_w, factor_h);
+					}
+
+					int x = (int)Math.Round((decimal)(tp.ObjectGroup.AbsolutePosition.X * factor_w), 0);
+					int y = (int)Math.Round((decimal)(tp.ObjectGroup.AbsolutePosition.Y * factor_h), 0);
+
+					m_log.DebugFormat ("region = ({0}, {1}), grid = ({2}, {3}), {4}",
+						tp.ObjectGroup.AbsolutePosition.X,
+						tp.ObjectGroup.AbsolutePosition.Y,
+						x,
+						y,
+						tp);
+					grid[x,y] = TrackIdToChar(track_id);
+				}
+			}
+
+			string rv="";
+			for(int y=0;y<height;y++) {
+				for(int x=0;x<width;x++)
+					rv += grid[x,y];
+				rv += "\n";
+			}
+			return rv;
+			
+		}
+
+		public string ToAsciiGrid()
+		{
+			
+			return ToAsciiGrid (80, 24);
+		}
 	}
 }
 
