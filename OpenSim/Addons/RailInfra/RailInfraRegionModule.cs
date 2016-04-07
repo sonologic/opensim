@@ -13,6 +13,7 @@ using System.Reflection;
 using System.Collections.Generic;
 using OpenSim.Addons.RailInfra;
 using OpenSim.Region.ScriptEngine.Shared;
+using OpenSim.Region.ScriptEngine.Interfaces;
 using OpenSim.Addons.RailInfra.Utils;
 
 
@@ -176,8 +177,15 @@ namespace OpenSim.Addons.RailInfra
 			m_layouts = new Dictionary<Scene, Layout>();
 
 			foreach (Scene scene in Scenes) {
-				m_log.DebugFormat ("[RailInfra] fetching objects for region {0}", scene.Name);
+				
 
+				m_log.DebugFormat ("[RailInfra] scanning region {0}", scene.Name);
+
+				IScriptModule[] engines = scene.RequestModuleInterfaces<IScriptModule>();
+				foreach (IScriptModule engine in engines) {
+					m_log.DebugFormat ("[RailInfra] script engine: {0}", engine.Name);
+				}
+				
 				// collect guides / alt guides
 				List<SceneObjectGroup> objects = scene.GetSceneObjectGroups ();
 				List<SceneObjectGroup> guides = new List<SceneObjectGroup>();
@@ -204,7 +212,7 @@ namespace OpenSim.Addons.RailInfra
 					m_log.DebugFormat ("out| tp1 = {0}, {1}, {2}, partcount={1}",
 						g1.Description, 
 						g1.AbsolutePosition,
-						StringUtils.FormatAxisAngle(g1.GroupRotation),
+						StringUtils.FormatAxisAngle(Quaternion.Normalize(g1.GroupRotation)),
 						g1.GetPartCount());
 					foreach (SceneObjectGroup g2 in guides) {
 						float dist = MathUtils.DistanceSquared(g1, g2);
@@ -213,9 +221,9 @@ namespace OpenSim.Addons.RailInfra
 							double ang_obj = MathUtils.GetAngle(g1, g2);
 
 							if (dist <= TrackPointDistanceSquared && ang_obj <= TrackPointAngle) {
-								m_log.DebugFormat ("*in| tp2 = {0}, {1}, {2}, distance = {3}, angle = {4}", 
-									g2.Description, g2.AbsolutePosition, StringUtils.FormatAxisAngle (g2.GroupRotation),
-									dist, ang_obj);
+								m_log.DebugFormat ("*in| tp2 = {0}, {1}, {2}, distance = {3}, angle = {4}, delta_rot = {5}", 
+									g2.Description, g2.AbsolutePosition, StringUtils.FormatAxisAngle( g2.GroupRotation),
+									dist, ang_obj, StringUtils.FormatAxisAngle(g2.GroupRotation / g1.GroupRotation));
 
 								// if Guide, potential candidate
 								if (g2.Name == "Guide") {
@@ -244,6 +252,11 @@ namespace OpenSim.Addons.RailInfra
 					}
 
 					TrackPoint new_tp;
+
+					// if g1 itself is alt guide, don't consider promotion to switch
+					if (g1.Name == "Alt Guide" && candidate != null && alt_candidate != null) {
+						candidate = null;
+					}
 
 
 					// get TrackPoint objects from obj_to_tp dict (create if first seen)
@@ -420,7 +433,7 @@ namespace OpenSim.Addons.RailInfra
 		{
 			foreach (Scene scene in Scenes) {
 				MainConsole.Instance.OutputFormat ("---[ Region {0}", scene.RegionInfo.RegionName);
-				MainConsole.Instance.OutputFormat ("{0}", m_layouts [scene].ToAsciiGrid (100,100));
+				MainConsole.Instance.OutputFormat ("{0}", m_layouts [scene].ToAsciiGrid (100,200));
 			}
 		}
 
@@ -443,6 +456,7 @@ namespace OpenSim.Addons.RailInfra
 			);
 
 			SceneObjectGroup sender = ((Scene)chat.Scene).GetSceneObjectGroup(chat.SenderUUID);
+
 
 
 
@@ -472,6 +486,22 @@ namespace OpenSim.Addons.RailInfra
 						default:
 							break;
 						}
+
+						IScriptModule[] engines = sender.Scene.RequestModuleInterfaces<IScriptModule>();
+						foreach (IScriptModule engine in engines) {
+							m_log.DebugFormat ("[RailInfra] notifying script engine: {0}", engine.Name);
+
+							object[] resobj = new object[]
+							{
+								// Event: link_message( integer sender_num, integer num, string str, key id ){ ; }
+								new LSL_Types.LSLInteger(0), new LSL_Types.LSLInteger(42), new LSL_Types.LSLString("foo bar"), new LSL_Types.LSLString("")
+							};
+
+							engine.PostObjectEvent(sender.UUID, //partItemID,
+								"link_message",
+								resobj);
+						}
+
 					} else {
 						m_log.DebugFormat ("Invalid number of tokens: {0}", tokens.Length);
 					}
