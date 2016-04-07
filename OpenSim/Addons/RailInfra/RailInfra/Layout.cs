@@ -146,7 +146,7 @@ namespace OpenSim.Addons.RailInfra
 						x,
 						y,
 						tp);
-					grid[x,y] = TrackIdToChar(track_id);
+					grid[x,height-y] = TrackIdToChar(track_id);
 				}
 			}
 

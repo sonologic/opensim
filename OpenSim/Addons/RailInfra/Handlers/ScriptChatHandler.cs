@@ -2,9 +2,9 @@
 
 namespace OpenSim.Addons.RailInfra
 {
-	public class Infra
+	public class ScriptChatHandlers
 	{
-		public Infra ()
+		public ScriptChatHandlers ()
 		{
 		}
 	}
